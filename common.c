@@ -134,12 +134,17 @@ int map_command_to_action(const char *command, struct action *message) {
     if (strcmp(command, "start") == 0) {
         message->type = 0; // Comando "start"
         return 1;
-    } else if (strcmp(command, "move") == 0) {
+    } else if (strcmp(command, "right") == 0 || strcmp(command, "left") == 0 || strcmp(command, "up") == 0 || strcmp(command, "down") == 0) {
         message->type = 1; // Comando "move"
-        printf("Digite o movimento (1=Cima, 2=Direita, 3=Baixo, 4=Esquerda): ");
-        int move;
-        scanf("%d", &move);
-        message->moves[0] = move; // Define o movimento
+        if (strcmp(command, "right") == 0) {
+            message->moves[0] = 2;
+        } else if (strcmp(command, "left") == 0) {
+            message->moves[0] = 4;
+        } else if (strcmp(command, "up") == 0) {
+            message->moves[0] = 1;
+        } else if (strcmp(command, "down") == 0) {
+            message->moves[0] = 3;
+        }
         return 1;
     } else if (strcmp(command, "map") == 0) {
         message->type = 2; // Comando "map"
