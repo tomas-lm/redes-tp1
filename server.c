@@ -16,6 +16,7 @@ int discovered_map[MAX_MAP_SIZE][MAX_MAP_SIZE];
 int map_rows = 0, map_cols = 0;
 int player_x = -1, player_y = -1;
 int game_started = 0;
+int game_over = 0;
 
 
 // Function prototypes
@@ -128,13 +129,28 @@ void handle_message(int csock, struct action *msg, const char *input_file) {
     char buffer[BUFFER];
     memset(buffer, 0, BUFFER);
 
+    // Cria estrutura de resposta
+    struct action response;
+    response.type = 4; // Set the default response type
+
+    // print the message type
+    printf("Message type: %d\n", msg->type);
+
+    if (game_over) {
+        response.type = 5; // GAME OVER
+        printf("Game over. Reset to play again.\n");
+        return;
+    }
+
     switch (msg->type) {
         case 0: // start
             if (!game_started) {
                 // Locate the entrance
                 int found = 0;
-                for (int i = 0; i < map_rows; i++) {
-                    for (int j = 0; j < map_cols; j++) {
+                for (int i = 0; i < map_rows; i++) 
+                {
+                    for (int j = 0; j < map_cols; j++) 
+                    {
                         if (map[i][j] == 2) { // Found entrance
                             player_x = i;
                             player_y = j;
@@ -145,76 +161,192 @@ void handle_message(int csock, struct action *msg, const char *input_file) {
                     if (found) break;
                 }
 
-                if (!found) {
-                    snprintf(buffer, BUFFER, "error: no entrance (2) found on the map");
-                    send(csock, buffer, strlen(buffer), 0);
+                if (!found) 
+                {
+                    send(csock, buffer, BUFFER, 0);
                     return;
                 }
-
                 update_discovered_map();
                 game_started = 1;
-                snprintf(buffer, BUFFER, "Game started. Player at entrance (%d, %d).", player_x, player_y);
-            } else {
-                snprintf(buffer, BUFFER, "Game already started.");
+
+            } 
+            else 
+            {
+                printf("error: game already started\n");
             }
             break;
 
         case 1: // move
-            if (!game_started) {
-                snprintf(buffer, BUFFER, "error: start the game first");
-            } else {
+            printf("Received move: %d\n", msg->moves[0]);
+            if (!game_started) 
+            {
+                printf("error: start the game first\n");
+            } 
+            else 
+            {
                 int move = msg->moves[0];
                 int valid_move = 0;
-                if (move == 1 && player_x > 0 && map[player_x - 1][player_y] != 0) {
+                if (move == 1 && player_x > 0 && (map[player_x - 1][player_y] != 0 || map[player_x - 1][player_y] == 3)) {
                     player_x--; // Up
                     valid_move = 1;
-                } else if (move == 2 && player_y < map_cols - 1 && map[player_x][player_y + 1] != 0) {
+                } else if (move == 2 && player_y < map_cols - 1 && (map[player_x][player_y + 1] != 0 || map[player_x][player_y + 1] == 3)) {
                     player_y++; // Right
                     valid_move = 1;
-                } else if (move == 3 && player_x < map_rows - 1 && map[player_x + 1][player_y] != 0) {
+                } else if (move == 3 && player_x < map_rows - 1 && (map[player_x + 1][player_y] != 0 || map[player_x + 1][player_y] == 3)) {
                     player_x++; // Down
                     valid_move = 1;
-                } else if (move == 4 && player_y > 0 && map[player_x][player_y - 1] != 0) {
+                } else if (move == 4 && player_y > 0 && (map[player_x][player_y - 1] != 0 || map[player_x][player_y - 1] == 3)) {
                     player_y--; // Left
                     valid_move = 1;
                 }
 
-                if (!valid_move) {
-                    snprintf(buffer, BUFFER, "error: you cannot go this way");
-                } else {
-                    update_discovered_map();
-                    snprintf(buffer, BUFFER, "Player moved to (%d, %d).", player_x, player_y);
+                
+                if (!valid_move) 
+                {
+                    printf("not a valid move\n");
                 }
+
+                else 
+                {
+                    if (map[player_x][player_y] == 3) { // Found exit
+                        printf("FOUND EXIT\n");
+                        response.type = 5; // WIN
+                        game_over = 1;
+
+                        for (int i = 0; i < MAX_MAP_SIZE; i++) 
+                        {
+                            for (int j = 0; j < MAX_MAP_SIZE; j++) 
+                            {
+                                if (i < map_rows && j < map_cols) 
+                                {
+                                    response.board[i][j] = map[i][j];
+                                } 
+                                else 
+                                {
+                                    response.board[i][j] = -1; // Pad with -1
+                                }
+                            }
+                        }
+                    
+                        // Send the map to the client
+                        printf("Sending the map to the client\n");
+                        send(csock, &response, BUFFER, 0);
+                        return;
+                        break;
+                    }
+                    update_discovered_map();
+                }
+                // Calculate possible moves
+                memset(response.moves, 0, sizeof(response.moves));
+                int move_index = 0;
+
+                if (player_x > 0 && map[player_x - 1][player_y] != 0) {
+                    response.moves[move_index++] = 1; // up
+                }
+                if (player_y < map_cols - 1 && map[player_x][player_y + 1] != 0) {
+                    response.moves[move_index++] = 2; // right
+                }
+                if (player_x < map_rows - 1 && map[player_x + 1][player_y] != 0) {
+                    response.moves[move_index++] = 3; // down
+                }
+                if (player_y > 0 && map[player_x][player_y - 1] != 0) {
+                    response.moves[move_index++] = 4; // left
+                }
+
+                // Send possible moves to the client
+                response.type = 4;
+                send(csock, &response, BUFFER, 0);
+                return;
             }
             break;
 
         case 2: // map
-            if (!game_started) {
-                snprintf(buffer, BUFFER, "error: start the game first");
-            } else {
-                snprintf(buffer, BUFFER, "Partial map sent to client.");
-                // Send the discovered map to the client
-                send(csock, discovered_map, sizeof(discovered_map), 0);
+            if (!game_started) 
+            {
+                printf("error: start the game first\n");
+            } 
+            else if (game_over) 
+            {
+                printf("Game over. Reset to play again.\n");
+            }
+            else 
+            {
+                // Prepare a 10x10 map filled with -1
+                int padded_map[MAX_MAP_SIZE][MAX_MAP_SIZE];
+                for (int i = 0; i < MAX_MAP_SIZE; i++) {
+                    for (int j = 0; j < MAX_MAP_SIZE; j++) {
+                        padded_map[i][j] = -1;
+                    }
+                }
+
+                // Copy the discovered_map into the padded_map
+                for (int i = 0; i < map_rows; i++) {
+                    for (int j = 0; j < map_cols; j++) {
+                        padded_map[i][j] = discovered_map[i][j];
+                    }
+                }
+
+                // Mark the player in the map
+                padded_map[player_x][player_y] = 5;
+                
+
+                // Copy padded_map to response board
+                for (int i = 0; i < MAX_MAP_SIZE; i++) {
+                    for (int j = 0; j < MAX_MAP_SIZE; j++) {
+                        response.board[i][j] = padded_map[i][j];
+                    }
+                }
+                response.type = 4; // map
+                // Send the padded map to the client
+                send(csock, &response, BUFFER, 0);
+                printf("Partial map sent to client.\n");
+                print_map(discovered_map); // Print the discovered map on the server
                 return;
             }
             break;
 
         case 3: // hint
             if (!game_started) {
-                snprintf(buffer, BUFFER, "error: start the game first");
-            } else {
-                snprintf(buffer, BUFFER, "Hint: right, right, down."); // Example placeholder
+                printf("error: start the game first\n");
+            } 
+            else 
+            {
+                printf("Hint not implemented yet\n");
             }
             break;
 
         case 6: // reset
             reset_game(input_file);
-            snprintf(buffer, BUFFER, "Game reset.");
+            game_started = 1;
+            game_over = 0;
+            // Locate the entrance
+            int found = 0;
+            for (int i = 0; i < map_rows; i++) {
+                for (int j = 0; j < map_cols; j++) {
+                    if (map[i][j] == 2) { // Found entrance
+                        player_x = i;
+                        player_y = j;
+                        found = 1;
+                        break;
+                    }
+                }
+                if (found) break;
+            }
+
+            if (!found) {
+                printf("error: no entrance (2) found on the map\n");
+            }
+                
+            update_discovered_map();
+            game_started = 1;
+
+            printf("Game reset. Player at entrance (%d, %d).\n", player_x, player_y);
+            //! ENVIAR RESPOSTA COM POSSIVEIS MOVIMENTOS
             break;
 
         case 7: // exit
-            snprintf(buffer, BUFFER, "Goodbye!");
-            send(csock, buffer, strlen(buffer), 0);
+            printf("Exiting...\n");
+            send(csock, buffer, BUFFER, 0); //! ENVIAR RESPOSTA
             close(csock);
             return;
 
@@ -222,7 +354,9 @@ void handle_message(int csock, struct action *msg, const char *input_file) {
             snprintf(buffer, BUFFER, "error: command not found");
     }
 
-    send(csock, buffer, strlen(buffer), 0);
+
+    printf("Sending message: %s\n", buffer);
+    send(csock, buffer, BUFFER, 0);
 }
 
 
@@ -271,14 +405,26 @@ int main(int argc, char **argv) {
         addrtostr(caddr, caddrstr, BUFFER);
         printf("[log] connection from %s\n", caddrstr);
 
-        struct action msg;
-        memset(&msg, 0, sizeof(msg));
-        size_t count = recv(csock, &msg, sizeof(msg), 0);
-        if (count > 0) {
+        // Process messages from this client in a loop
+        while (1) {
+            printf("[log] waiting for a message\n");
+            struct action msg;
+            memset(&msg, 0, sizeof(msg));
+
+            // Receive a message from the client
+            size_t count = recv(csock, &msg, sizeof(msg), 0);
+            if (count <= 0) {
+                printf("[log] client disconnected\n");
+                break; // Exit the loop if the client disconnects
+            }
+
+            // Handle the received message
             handle_message(csock, &msg, input_file);
         }
 
+        // Close the client socket after the loop ends
         close(csock);
+        printf("[log] closed connection from %s\n", caddrstr);
     }
 
     close(s);
