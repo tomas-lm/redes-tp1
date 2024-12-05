@@ -10,8 +10,12 @@
 
 #define BUFFER 1024
 
+// Global vars
+int moves[4] = {0, 0, 0, 0};
+int game_start = 0;
+
 // Functions prototypes
-void process_and_print_filtered_map(int *map, int size);
+void process_and_print_filtered_map(int board[10][10], int size);
 void print_possible_moves(int *possible_moves, int size);
 
 
@@ -68,7 +72,8 @@ int main(int argc, char **argv){
     memset(buf, 0, BUFFER);
     memset(&message, 0, sizeof(message));
 
-    while (1) {
+    while (1) 
+    {
         // Solicita o comando do usuário
         printf("Digite o comando: ");
         fgets(buf, BUFFER - 1, stdin);
@@ -83,8 +88,33 @@ int main(int argc, char **argv){
         // Mapeia o comando para a struct action
         memset(&message, 0, sizeof(message));
         if (!map_command_to_action(buf, &message)) {
-            printf("Comando inválido. Tente novamente.\n");
+            printf("error: command not found\n");
             continue;
+        }
+        //! =====================================
+        //! TRATANDO O COMANDO DO USUARIO
+        //! =====================================
+        if(message.type == 0 && game_start == 0){
+            game_start = 1;
+        } 
+        else if (message.type !=0 && game_start == 0){
+            printf("error: start the game first\n");
+            continue;
+        } 
+
+        if(message.type == 1){
+            // Verifica se o movimento é válido
+            int valid = 0;
+            for (int i = 0; i < 4; i++) {
+                if (moves[i] == message.moves[0]) {
+                    valid = 1;
+                    break;
+                }
+            }
+            if (!valid) {
+                printf("error: you cannot go this way\n");
+                continue;
+            }
         }
 
         // Envia a struct
@@ -102,133 +132,125 @@ int main(int argc, char **argv){
         size_t expected_size = sizeof(response);
 
         while (total < expected_size) {
-            printf("Receiving response...\n");
-            size_t count = recv(s, &response, expected_size - total, 0);
+            size_t count = recv(s, &response, expected_size, 0);
             if (count <= 0) {
                 printf("Error or server disconnected\n");
                 break;
             }
             total += count;
         }
-        
-        // Print response.type
-        printf("Response type: %d\n", response.type);
+
 
         //! =====================================
         //! LIDA COM A RESPOSTA VINDA DO SERVIDOR
         //! =====================================
 
-
-        if (message.type == 0) //* START
-        {
-            printf("Jogo iniciado.\n");
-        }
-        else if (message.type == 1) //* MOVIMENTO
-        {
-            int possible_moves[4] = {0, 0, 0, 0};
-            memcpy(possible_moves, buf, sizeof(possible_moves));
-            print_possible_moves(possible_moves, 4);
-        }
-        else if (message.type == 2) //* MAPA
-        {
-        printf("Mapa recebido:\n");
-        int *map = (int *)buf;
-        int map_size = 10;
-        process_and_print_filtered_map(map, map_size);
-        }
-        else if (message.type == 3) //* DICA
-        {
-            printf("Dica não foi implementado ainda\n");
-        }
-        else if (message.type == 4) //* UPDATE
-        {
-            printf("Update não foi implementado ainda\n");
-        }
-        else if (message.type == 5) //* WIN
-        {
-            printf("Você venceu!\n");
-        }
-        else if (message.type == 6) //* RESET
-        {
-            printf("Jogo resetado.\n");
-        }
-        else if (message.type == 7) //* EXIT
+        if (message.type == 7) //* EXIT
         {
             printf("Saindo...\n");
             break;
+        }
+
+        if (response.type == 4) // UPDATE
+        {
+            if (message.type == 0) //* START
+            {
+                print_possible_moves(response.moves, 4);
+                // update moves
+                memcpy(moves, response.moves, sizeof(moves));
+            }
+            else if (message.type == 1) //* MOVIMENTO
+            {
+                int possible_moves[4] = {0, 0, 0, 0};
+                memcpy(possible_moves, response.moves, sizeof(possible_moves));
+                print_possible_moves(possible_moves, 4);
+                // update moves
+                memcpy(moves, response.moves, sizeof(moves));
+            }
+            else if (message.type == 2) //* MAPA
+            {
+            process_and_print_filtered_map(response.board, 10);
+            }
+            else if (message.type == 3) //* DICA
+            {
+                printf("Dica não foi implementado ainda\n");
+            }
+            else if (message.type == 4) //* UPDATE
+            {
+                printf("Update não foi implementado ainda\n");
+            }
+            else if (message.type == 5) //* WIN
+            {
+                printf("Você venceu!\n");
+            }
+            else if (message.type == 6) //* RESET
+            {
+                print_possible_moves(response.moves, 4);
+                // update moves
+                memcpy(moves, response.moves, sizeof(moves));
+            }
+            else 
+            {
+                printf("Resposta: %s\n", buf);
+            }
+        }
+        else if (response.type == 5) // WIN
+        {
+            printf("Você venceu! Apenas use os comando reset ou exit\n");
+            process_and_print_filtered_map(response.board, 10);
         }
         else 
         {
             printf("Resposta: %s\n", buf);
         }
-    }
 
+    }
+    printf("Fechando o socket\n");
     close(s);
     return 0;
 }
 
+void process_and_print_filtered_map(int board[10][10], int size) {
 
-
-
-void process_and_print_filtered_map(int *map, int size) {
-    char filtered_map[size][size];
-    memset(filtered_map, 0, sizeof(filtered_map)); // Initialize to avoid garbage
-
-    int filtered_rows = 0;
+    // Determine the bounds for valid rows and columns
+    int border = 0; // Adjust to find the actual valid size
     for (int i = 0; i < size; i++) {
-        int row_has_valid_data = 0;
         for (int j = 0; j < size; j++) {
-            int value = map[i * size + j];
+            if (board[i][j] != -1) {
+                if (i + 1 > border) border = i + 1; // Update to include valid rows
+                if (j + 1 > border) border = j + 1; // Update to include valid columns
+            }
+        }
+    }
+
+    printf("Border size: %d\n", border);
+    // Validate that there's no padding (-1) in the filtered map
+    if (border == 0) {
+        return; // Exit early if all padding
+    }
+
+    // Print the filtered map with valid dimensions
+    for (int i = 0; i < border; i++) {
+        for (int j = 0; j < border; j++) {
+            int value = board[i][j];
 
             // Map integers to character representations
+            char symbol = ' ';
             switch (value) {
-                case 0:
-                    filtered_map[filtered_rows][j] = '#'; // Muro
-                    row_has_valid_data = 1;
-                    break;
-                case 1:
-                    filtered_map[filtered_rows][j] = '_'; // Caminho livre
-                    row_has_valid_data = 1;
-                    break;
-                case 2:
-                    filtered_map[filtered_rows][j] = '>'; // Entrada
-                    row_has_valid_data = 1;
-                    break;
-                case 3:
-                    filtered_map[filtered_rows][j] = 'X'; // Saída
-                    row_has_valid_data = 1;
-                    break;
-                case 4:
-                    filtered_map[filtered_rows][j] = '?'; // Não descoberto
-                    row_has_valid_data = 1;
-                    break;
-                case 5:
-                    filtered_map[filtered_rows][j] = '+'; // Jogador
-                    row_has_valid_data = 1;
-                    break;
-                default:
-                    filtered_map[filtered_rows][j] = '\0'; // Ensure invalid values are skipped
-                    break;
+                case 0: symbol = '#'; break; // Wall
+                case 1: symbol = '_'; break; // Free path
+                case 2: symbol = '>'; break; // Entrance
+                case 3: symbol = 'X'; break; // Exit
+                case 4: symbol = '?'; break; // Undiscovered
+                case 5: symbol = '+'; break; // Player
             }
-        }
 
-        // Only increment filtered_rows if the row has valid data
-        if (row_has_valid_data) {
-            filtered_rows++;
+            printf("%c\t", symbol); // Print with tab spacing
         }
-    }
-
-    // Print the filtered map
-    printf("Mapa processado:\n");
-    for (int i = 0; i < filtered_rows; i++) {
-        for (int j = 0; j < size; j++) {
-            if (filtered_map[i][j] != '\0') { // Skip empty cells
-                printf("%c\t", filtered_map[i][j]);
-            }
-        }
-        printf("\n");
+        printf("\n"); // New line at the end of each row
     }
 }
+
 
 
 

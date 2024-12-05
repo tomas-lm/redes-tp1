@@ -22,7 +22,7 @@ int game_over = 0;
 // Function prototypes
 void load_map(const char *filename);
 void usage(int argc, char **argv);
-void handle_message(int csock, struct action *msg, const char *input_file);
+int handle_message(int csock, struct action *msg, const char *input_file);
 void reset_game(const char *input_file);
 void init_discovered_map();
 void update_discovered_map();
@@ -125,21 +125,20 @@ void usage(int argc, char **argv) {
     exit(EXIT_FAILURE);
 }
 
-void handle_message(int csock, struct action *msg, const char *input_file) {
+int handle_message(int csock, struct action *msg, const char *input_file) {
     char buffer[BUFFER];
     memset(buffer, 0, BUFFER);
 
     // Cria estrutura de resposta
     struct action response;
     response.type = 4; // Set the default response type
-
-    // print the message type
-    printf("Message type: %d\n", msg->type);
-
+    printf("[log] received message type: %d\n", msg->type);
     if (game_over) {
         response.type = 5; // GAME OVER
-        printf("Game over. Reset to play again.\n");
-        return;
+        if(msg->type != 6 && msg->type != 7){
+            printf("Game over. Reset or exit to play again.\n");
+            return -1;
+        }
     }
 
     switch (msg->type) {
@@ -164,10 +163,33 @@ void handle_message(int csock, struct action *msg, const char *input_file) {
                 if (!found) 
                 {
                     send(csock, buffer, BUFFER, 0);
-                    return;
+                    return -1;
                 }
                 update_discovered_map();
                 game_started = 1;
+
+
+                // Calculate possible moves
+                memset(response.moves, 0, sizeof(response.moves));
+                int move_index = 0;
+
+                if (player_x > 0 && map[player_x - 1][player_y] != 0) {
+                    response.moves[move_index++] = 1; // up
+                }
+                if (player_y < map_cols - 1 && map[player_x][player_y + 1] != 0) {
+                    response.moves[move_index++] = 2; // right
+                }
+                if (player_x < map_rows - 1 && map[player_x + 1][player_y] != 0) {
+                    response.moves[move_index++] = 3; // down
+                }
+                if (player_y > 0 && map[player_x][player_y - 1] != 0) {
+                    response.moves[move_index++] = 4; // left
+                }
+
+                // Send possible moves to the client
+                response.type = 4;
+                send(csock, &response, BUFFER, 0);
+                return 0;
 
             } 
             else 
@@ -231,7 +253,8 @@ void handle_message(int csock, struct action *msg, const char *input_file) {
                         // Send the map to the client
                         printf("Sending the map to the client\n");
                         send(csock, &response, BUFFER, 0);
-                        return;
+
+                        return 0;
                         break;
                     }
                     update_discovered_map();
@@ -256,7 +279,7 @@ void handle_message(int csock, struct action *msg, const char *input_file) {
                 // Send possible moves to the client
                 response.type = 4;
                 send(csock, &response, BUFFER, 0);
-                return;
+                return 0;
             }
             break;
 
@@ -286,8 +309,11 @@ void handle_message(int csock, struct action *msg, const char *input_file) {
                     }
                 }
 
+
                 // Mark the player in the map
-                padded_map[player_x][player_y] = 5;
+                if (padded_map[player_x][player_y] != 2 && padded_map[player_x][player_y] != 5){
+                    padded_map[player_x][player_y] = 5;
+                }
                 
 
                 // Copy padded_map to response board
@@ -296,12 +322,14 @@ void handle_message(int csock, struct action *msg, const char *input_file) {
                         response.board[i][j] = padded_map[i][j];
                     }
                 }
+
+
                 response.type = 4; // map
                 // Send the padded map to the client
                 send(csock, &response, BUFFER, 0);
                 printf("Partial map sent to client.\n");
                 print_map(discovered_map); // Print the discovered map on the server
-                return;
+                return 0;
             }
             break;
 
@@ -342,21 +370,50 @@ void handle_message(int csock, struct action *msg, const char *input_file) {
 
             printf("Game reset. Player at entrance (%d, %d).\n", player_x, player_y);
             //! ENVIAR RESPOSTA COM POSSIVEIS MOVIMENTOS
+
+            memset(response.moves, 0, sizeof(response.moves));
+            int move_index = 0;
+
+            if (player_x > 0 && map[player_x - 1][player_y] != 0) {
+                response.moves[move_index++] = 1; // up
+            }
+            if (player_y < map_cols - 1 && map[player_x][player_y + 1] != 0) {
+                response.moves[move_index++] = 2; // right
+            }
+            if (player_x < map_rows - 1 && map[player_x + 1][player_y] != 0) {
+                response.moves[move_index++] = 3; // down
+            }
+            if (player_y > 0 && map[player_x][player_y - 1] != 0) {
+                response.moves[move_index++] = 4; // left
+            }
+
+            // Send possible moves to the client
+            response.type = 4;
+            send(csock, &response, BUFFER, 0);
+            return 0;
+
             break;
 
         case 7: // exit
-            printf("Exiting...\n");
+            printf("Client disconnected\n");
+            game_over = 0;
+            game_started = 0;
+            reset_game(input_file);
+
+            memset(buffer, 0, BUFFER);
             send(csock, buffer, BUFFER, 0); //! ENVIAR RESPOSTA
             close(csock);
-            return;
+            return -1;
 
         default: // Invalid command
-            snprintf(buffer, BUFFER, "error: command not found");
+            printf("Invalid command\n");
+            return -1;
     }
 
 
     printf("Sending message: %s\n", buffer);
     send(csock, buffer, BUFFER, 0);
+    return 0;
 }
 
 
@@ -419,7 +476,10 @@ int main(int argc, char **argv) {
             }
 
             // Handle the received message
-            handle_message(csock, &msg, input_file);
+            int code = handle_message(csock, &msg, input_file);
+            if (code < 0) {
+                break; // Exit the loop if the client sends an invalid command
+            }
         }
 
         // Close the client socket after the loop ends
